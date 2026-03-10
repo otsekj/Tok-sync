@@ -2,21 +2,30 @@
 <html>
 <head>
   <style>
-    body { font-family: sans-serif; padding: 20px; display: flex; flex-direction: column; gap: 15px; }
+    body { font-family: sans-serif; padding: 20px; display: flex; flex-direction: column; gap: 12px; }
     button { padding: 12px; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; }
     .btn-push { background: #18A0FB; color: white; }
     .btn-pull { background: #1BC47D; color: white; }
+    input { padding: 8px; border: 1px solid #ccc; border-radius: 4px; font-size: 10px; }
+    label { font-size: 10px; font-weight: bold; color: #666; }
     #status { font-size: 11px; color: #666; background: #eee; padding: 8px; border-radius: 4px; min-height: 20px; }
+    .token-section { display: flex; flex-direction: column; gap: 5px; border-bottom: 1px solid #eee; padding-bottom: 10px; }
   </style>
 </head>
 <body>
+  <div class="token-section">
+    <label>GITHUB TOKEN (ghp_...)</label>
+    <input type="password" id="tokenInput" placeholder="Вставьте токен и он сохранится">
+    <button style="background: #333; color: white; padding: 5px; font-size: 10px;" id="saveTokenBtn">Save Token</button>
+  </div>
+
   <button class="btn-push" id="pushBtn">📤 Push to GitHub</button>
   <button class="btn-pull" id="pullBtn">📥 Fix Selection (from GitHub)</button>
   <div id="status">Ready</div>
 
   <script>
     const CONFIG = {
-      repo: 'otsekj/Tok-sync', // ПРОВЕРЬ ЭТО ИМЯ!
+      repo: 'otsekj/Tok-sync',
       path: 'tokens.json',
       branch: 'main'
     };
@@ -30,31 +39,34 @@
 
     window.onmessage = async (event) => {
       const msg = event.data.pluginMessage;
-      
       if (msg.type === 'token-loaded') {
-        savedToken = msg.token || '';
-        if (!savedToken) {
-          const input = prompt("GitHub Token не найден. Вставьте ваш ghp_... токен:");
-          if (input) {
-            savedToken = input;
-            parent.postMessage({ pluginMessage: { type: 'save-token', token: input } }, '*');
-          }
+        if (msg.token) {
+          savedToken = msg.token;
+          document.getElementById('tokenInput').value = "********";
+          document.getElementById('status').innerText = "Token loaded from storage";
         }
       }
-
       if (msg.type === 'push-to-github') {
         await uploadToGithub(msg.data);
       }
     };
 
+    document.getElementById('saveTokenBtn').onclick = () => {
+      const input = document.getElementById('tokenInput').value;
+      if (input && input !== "********") {
+        savedToken = input;
+        parent.postMessage({ pluginMessage: { type: 'save-token', token: input } }, '*');
+      }
+    };
+
     document.getElementById('pushBtn').onclick = () => {
-      if (!savedToken) return alert("Нужен токен!");
+      if (!savedToken) return alert("Сначала введите и сохраните токен!");
       document.getElementById('status').innerText = "Processing Figma variables...";
       parent.postMessage({ pluginMessage: { type: 'prepare-export' } }, '*');
     };
 
     document.getElementById('pullBtn').onclick = async () => {
-      if (!savedToken) return alert("Нужен токен!");
+      if (!savedToken) return alert("Сначала введите и сохраните токен!");
       document.getElementById('status').innerText = "Fetching data from GitHub...";
       try {
         const url = `https://api.github.com/repos/${CONFIG.repo}/contents/${CONFIG.path}`;
@@ -63,29 +75,22 @@
         const data = JSON.parse(atob(file.content));
         parent.postMessage({ pluginMessage: { type: 'apply-from-github', data } }, '*');
       } catch (e) {
-        document.getElementById('status').innerText = "❌ Error: File not found on GitHub";
+        document.getElementById('status').innerText = "❌ Error: File not found or token invalid";
       }
     };
 
     async function uploadToGithub(jsonData) {
       const url = `https://api.github.com/repos/${CONFIG.repo}/contents/${CONFIG.path}`;
-      
-      // 1. Пытаемся получить SHA текущего файла
       const getFile = await fetch(url, { headers: { 'Authorization': `token ${savedToken}` } });
       let sha = getFile.ok ? (await getFile.json()).sha : null;
 
-      // 2. Пушим новый контент
       const res = await fetch(url, {
         method: 'PUT',
-        headers: { 
-          'Authorization': `token ${savedToken}`, 
-          'Content-Type': 'application/json' 
-        },
+        headers: { 'Authorization': `token ${savedToken}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({
           message: "Update tokens from Figma",
           content: btoa(unescape(encodeURIComponent(JSON.stringify(jsonData, null, 2)))),
-          sha: sha, 
-          branch: CONFIG.branch
+          sha: sha, branch: CONFIG.branch
         })
       });
 
