@@ -16,43 +16,60 @@
 
   <script>
     const CONFIG = {
-      token: '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',
-      repo: 'otsekj/tokens-sync',
+      repo: 'otsekj/Tok-sync', // Твой логин/репо
       path: 'tokens.json',
       branch: 'main'
     };
 
-    // Отправка в GitHub
-    document.getElementById('pushBtn').onclick = () => {
-      document.getElementById('status').innerText = "Processing Figma variables...";
-      parent.postMessage({ pluginMessage: { type: 'prepare-export' } }, '*');
-    };
+    let savedToken = '';
 
-    // Исправление макета
-    document.getElementById('pullBtn').onclick = async () => {
-      document.getElementById('status').innerText = "Fetching data from GitHub...";
-      const url = `https://api.github.com/repos/${CONFIG.repo}/contents/${CONFIG.path}`;
-      const res = await fetch(url, { headers: { 'Authorization': `token ${CONFIG.token}` } });
-      const file = await res.json();
-      const data = JSON.parse(atob(file.content));
-      parent.postMessage({ pluginMessage: { type: 'apply-from-github', data } }, '*');
+    // При старте запрашиваем токен из хранилища Figma
+    window.onload = () => {
+      parent.postMessage({ pluginMessage: { type: 'get-token' } }, '*');
     };
 
     window.onmessage = async (event) => {
       const msg = event.data.pluginMessage;
+      
+      // Получили токен из Figma
+      if (msg.type === 'token-loaded') {
+        savedToken = msg.token || '';
+        if (!savedToken) {
+          const input = prompt("Введите ваш GitHub Token (ghp_...):");
+          if (input) {
+            savedToken = input;
+            parent.postMessage({ pluginMessage: { type: 'save-token', token: input } }, '*');
+          }
+        }
+      }
+
       if (msg.type === 'push-to-github') {
         await uploadToGithub(msg.data);
       }
     };
 
+    document.getElementById('pushBtn').onclick = () => {
+      if (!savedToken) return alert("Токен не установлен!");
+      parent.postMessage({ pluginMessage: { type: 'prepare-export' } }, '*');
+    };
+
+    document.getElementById('pullBtn').onclick = async () => {
+      if (!savedToken) return alert("Токен не установлен!");
+      const url = `https://api.github.com/repos/${CONFIG.repo}/contents/${CONFIG.path}`;
+      const res = await fetch(url, { headers: { 'Authorization': `token ${savedToken}` } });
+      const file = await res.json();
+      const data = JSON.parse(atob(file.content));
+      parent.postMessage({ pluginMessage: { type: 'apply-from-github', data } }, '*');
+    };
+
     async function uploadToGithub(jsonData) {
       const url = `https://api.github.com/repos/${CONFIG.repo}/contents/${CONFIG.path}`;
-      const getFile = await fetch(url, { headers: { 'Authorization': `token ${CONFIG.token}` } });
+      const getFile = await fetch(url, { headers: { 'Authorization': `token ${savedToken}` } });
       let sha = getFile.ok ? (await getFile.json()).sha : null;
 
       const res = await fetch(url, {
         method: 'PUT',
-        headers: { 'Authorization': `token ${CONFIG.token}`, 'Content-Type': 'application/json' },
+        headers: { 'Authorization': `token ${savedToken}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({
           message: "Update from Figma",
           content: btoa(unescape(encodeURIComponent(JSON.stringify(jsonData, null, 2)))),
@@ -61,6 +78,6 @@
       });
       document.getElementById('status').innerText = res.ok ? "✅ Updated on GitHub!" : "❌ Error";
     }
-  </script>
+</script>
 </body>
 </html>
