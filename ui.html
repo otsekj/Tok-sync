@@ -6,7 +6,7 @@
     button { padding: 12px; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; }
     .btn-push { background: #18A0FB; color: white; }
     .btn-pull { background: #1BC47D; color: white; }
-    #status { font-size: 11px; color: #666; background: #eee; padding: 8px; border-radius: 4px; }
+    #status { font-size: 11px; color: #666; background: #eee; padding: 8px; border-radius: 4px; min-height: 20px; }
   </style>
 </head>
 <body>
@@ -16,7 +16,7 @@
 
   <script>
     const CONFIG = {
-      repo: 'otsekj/Tok-sync', // Твой логин/репо
+      repo: 'otsekj/Tok-sync', // ПРОВЕРЬ ЭТО ИМЯ!
       path: 'tokens.json',
       branch: 'main'
     };
@@ -31,11 +31,10 @@
     window.onmessage = async (event) => {
       const msg = event.data.pluginMessage;
       
-      // Получили токен из Figma
       if (msg.type === 'token-loaded') {
         savedToken = msg.token || '';
         if (!savedToken) {
-          const input = prompt("Введите ваш GitHub Token (ghp_...):");
+          const input = prompt("GitHub Token не найден. Вставьте ваш ghp_... токен:");
           if (input) {
             savedToken = input;
             parent.postMessage({ pluginMessage: { type: 'save-token', token: input } }, '*');
@@ -49,35 +48,54 @@
     };
 
     document.getElementById('pushBtn').onclick = () => {
-      if (!savedToken) return alert("Токен не установлен!");
+      if (!savedToken) return alert("Нужен токен!");
+      document.getElementById('status').innerText = "Processing Figma variables...";
       parent.postMessage({ pluginMessage: { type: 'prepare-export' } }, '*');
     };
 
     document.getElementById('pullBtn').onclick = async () => {
-      if (!savedToken) return alert("Токен не установлен!");
-      const url = `https://api.github.com/repos/${CONFIG.repo}/contents/${CONFIG.path}`;
-      const res = await fetch(url, { headers: { 'Authorization': `token ${savedToken}` } });
-      const file = await res.json();
-      const data = JSON.parse(atob(file.content));
-      parent.postMessage({ pluginMessage: { type: 'apply-from-github', data } }, '*');
+      if (!savedToken) return alert("Нужен токен!");
+      document.getElementById('status').innerText = "Fetching data from GitHub...";
+      try {
+        const url = `https://api.github.com/repos/${CONFIG.repo}/contents/${CONFIG.path}`;
+        const res = await fetch(url, { headers: { 'Authorization': `token ${savedToken}` } });
+        const file = await res.json();
+        const data = JSON.parse(atob(file.content));
+        parent.postMessage({ pluginMessage: { type: 'apply-from-github', data } }, '*');
+      } catch (e) {
+        document.getElementById('status').innerText = "❌ Error: File not found on GitHub";
+      }
     };
 
     async function uploadToGithub(jsonData) {
       const url = `https://api.github.com/repos/${CONFIG.repo}/contents/${CONFIG.path}`;
+      
+      // 1. Пытаемся получить SHA текущего файла
       const getFile = await fetch(url, { headers: { 'Authorization': `token ${savedToken}` } });
       let sha = getFile.ok ? (await getFile.json()).sha : null;
 
+      // 2. Пушим новый контент
       const res = await fetch(url, {
         method: 'PUT',
-        headers: { 'Authorization': `token ${savedToken}`, 'Content-Type': 'application/json' },
+        headers: { 
+          'Authorization': `token ${savedToken}`, 
+          'Content-Type': 'application/json' 
+        },
         body: JSON.stringify({
-          message: "Update from Figma",
+          message: "Update tokens from Figma",
           content: btoa(unescape(encodeURIComponent(JSON.stringify(jsonData, null, 2)))),
-          sha: sha, branch: CONFIG.branch
+          sha: sha, 
+          branch: CONFIG.branch
         })
       });
-      document.getElementById('status').innerText = res.ok ? "✅ Updated on GitHub!" : "❌ Error";
+
+      if (res.ok) {
+        document.getElementById('status').innerText = "✅ Updated on GitHub!";
+      } else {
+        const err = await res.json();
+        document.getElementById('status').innerText = "❌ GitHub Error: " + err.message;
+      }
     }
-</script>
+  </script>
 </body>
 </html>
