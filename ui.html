@@ -3,103 +3,105 @@
 <head>
   <style>
     body { font-family: sans-serif; padding: 20px; display: flex; flex-direction: column; gap: 12px; }
-    button { padding: 12px; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; }
-    .btn-push { background: #18A0FB; color: white; }
+    button { padding: 10px; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; }
+    .btn-push { background: #18A0FB; color: white; margin-top: 10px; }
     .btn-pull { background: #1BC47D; color: white; }
-    input { padding: 8px; border: 1px solid #ccc; border-radius: 4px; font-size: 10px; }
-    label { font-size: 10px; font-weight: bold; color: #666; }
-    #status { font-size: 11px; color: #666; background: #eee; padding: 8px; border-radius: 4px; min-height: 20px; }
-    .token-section { display: flex; flex-direction: column; gap: 5px; border-bottom: 1px solid #eee; padding-bottom: 10px; }
+    input[type="password"] { padding: 8px; border: 1px solid #ccc; border-radius: 4px; font-size: 10px; }
+    #collectionsContainer { background: #f9f9f9; border: 1px solid #eee; padding: 10px; border-radius: 4px; max-height: 120px; overflow-y: auto; }
+    .col-item { display: flex; align-items: center; gap: 8px; font-size: 11px; margin-bottom: 5px; }
+    #status { font-size: 10px; color: #666; background: #eee; padding: 8px; border-radius: 4px; }
+    label.title { font-size: 10px; font-weight: bold; color: #999; text-transform: uppercase; }
   </style>
 </head>
 <body>
-  <div class="token-section">
-    <label>GITHUB TOKEN (ghp_...)</label>
-    <input type="password" id="tokenInput" placeholder="Вставьте токен и он сохранится">
-    <button style="background: #333; color: white; padding: 5px; font-size: 10px;" id="saveTokenBtn">Save Token</button>
-  </div>
+  <label class="title">Settings</label>
+  <input type="password" id="tokenInput" placeholder="GitHub Token">
+  <button style="background: #333; color: white; font-size: 10px;" id="saveTokenBtn">Save Token</button>
 
-  <button class="btn-push" id="pushBtn">📤 Push to GitHub</button>
+  <label class="title">Select Collections to Sync</label>
+  <div id="collectionsContainer">Loading collections...</div>
+
+  <button class="btn-push" id="pushBtn">📤 Push Selected to GitHub</button>
   <button class="btn-pull" id="pullBtn">📥 Fix Selection (from GitHub)</button>
   <div id="status">Ready</div>
 
   <script>
-    const CONFIG = {
-      repo: 'otsekj/Tok-sync',
-      path: 'tokens.json',
-      branch: 'main'
-    };
-
+    const CONFIG = { repo: 'otsekj/Tok-sync', path: 'tokens.json', branch: 'main' };
     let savedToken = '';
 
-    // При старте запрашиваем токен из хранилища Figma
     window.onload = () => {
       parent.postMessage({ pluginMessage: { type: 'get-token' } }, '*');
+      parent.postMessage({ pluginMessage: { type: 'get-collections' } }, '*');
     };
 
     window.onmessage = async (event) => {
       const msg = event.data.pluginMessage;
+      
       if (msg.type === 'token-loaded') {
-        if (msg.token) {
-          savedToken = msg.token;
-          document.getElementById('tokenInput').value = "********";
-          document.getElementById('status').innerText = "Token loaded from storage";
-        }
+        savedToken = msg.token || '';
+        if (savedToken) document.getElementById('tokenInput').value = "********";
       }
+
+      if (msg.type === 'collections-list') {
+        const container = document.getElementById('collectionsContainer');
+        container.innerHTML = '';
+        msg.data.forEach(col => {
+          container.innerHTML += `
+            <div class="col-item">
+              <input type="checkbox" id="${col.id}" value="${col.id}" checked>
+              <label for="${col.id}">${col.name}</label>
+            </div>`;
+        });
+      }
+
       if (msg.type === 'push-to-github') {
         await uploadToGithub(msg.data);
       }
     };
 
     document.getElementById('saveTokenBtn').onclick = () => {
-      const input = document.getElementById('tokenInput').value;
-      if (input && input !== "********") {
-        savedToken = input;
-        parent.postMessage({ pluginMessage: { type: 'save-token', token: input } }, '*');
+      const val = document.getElementById('tokenInput').value;
+      if (val && val !== "********") {
+        savedToken = val;
+        parent.postMessage({ pluginMessage: { type: 'save-token', token: val } }, '*');
       }
     };
 
     document.getElementById('pushBtn').onclick = () => {
-      if (!savedToken) return alert("Сначала введите и сохраните токен!");
-      document.getElementById('status').innerText = "Processing Figma variables...";
-      parent.postMessage({ pluginMessage: { type: 'prepare-export' } }, '*');
+      const checkboxes = document.querySelectorAll('#collectionsContainer input:checked');
+      const selectedIds = Array.from(checkboxes).map(cb => cb.value);
+      
+      if (selectedIds.length === 0) return alert("Выберите хотя бы одну коллекцию!");
+      if (!savedToken) return alert("Нужен токен!");
+      
+      document.getElementById('status').innerText = "Exporting selected...";
+      parent.postMessage({ pluginMessage: { type: 'prepare-export', selectedIds } }, '*');
     };
 
+    // ... (функция uploadToGithub и pullBtn остаются такими же, как в прошлом шаге) ...
     document.getElementById('pullBtn').onclick = async () => {
-      if (!savedToken) return alert("Сначала введите и сохраните токен!");
-      document.getElementById('status').innerText = "Fetching data from GitHub...";
-      try {
-        const url = `https://api.github.com/repos/${CONFIG.repo}/contents/${CONFIG.path}`;
-        const res = await fetch(url, { headers: { 'Authorization': `token ${savedToken}` } });
-        const file = await res.json();
-        const data = JSON.parse(atob(file.content));
-        parent.postMessage({ pluginMessage: { type: 'apply-from-github', data } }, '*');
-      } catch (e) {
-        document.getElementById('status').innerText = "❌ Error: File not found or token invalid";
-      }
+      if (!savedToken) return alert("Нужен токен!");
+      const url = `https://api.github.com/repos/${CONFIG.repo}/contents/${CONFIG.path}`;
+      const res = await fetch(url, { headers: { 'Authorization': `token ${savedToken}` } });
+      const file = await res.json();
+      const data = JSON.parse(atob(file.content));
+      parent.postMessage({ pluginMessage: { type: 'apply-from-github', data } }, '*');
     };
 
     async function uploadToGithub(jsonData) {
       const url = `https://api.github.com/repos/${CONFIG.repo}/contents/${CONFIG.path}`;
       const getFile = await fetch(url, { headers: { 'Authorization': `token ${savedToken}` } });
       let sha = getFile.ok ? (await getFile.json()).sha : null;
-
       const res = await fetch(url, {
         method: 'PUT',
         headers: { 'Authorization': `token ${savedToken}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          message: "Update tokens from Figma",
+          message: "Update tokens",
           content: btoa(unescape(encodeURIComponent(JSON.stringify(jsonData, null, 2)))),
           sha: sha, branch: CONFIG.branch
         })
       });
-
-      if (res.ok) {
-        document.getElementById('status').innerText = "✅ Updated on GitHub!";
-      } else {
-        const err = await res.json();
-        document.getElementById('status').innerText = "❌ GitHub Error: " + err.message;
-      }
+      document.getElementById('status').innerText = res.ok ? "✅ Updated!" : "❌ Error";
     }
   </script>
 </body>
