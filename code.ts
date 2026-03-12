@@ -7,19 +7,16 @@ figma.clientStorage.getAsync('gh_token').then(token => {
 });
 
 async function walkAndApply(node: SceneNode, varMap: any) {
+  // 1. Обработка Auto Layout (Paddings и Gaps)
   if ("layoutMode" in node && node.layoutMode !== "NONE") {
-    const props = ['paddingTop', 'paddingBottom', 'paddingLeft', 'paddingRight', 'itemSpacing'];
-    
-    for (const prop of props) {
+    const layoutProps = ['paddingTop', 'paddingBottom', 'paddingLeft', 'paddingRight', 'itemSpacing'];
+    for (const prop of layoutProps) {
       const val = (node as any)[prop];
-      if (val > 0) {
+      if (typeof val === 'number' && val > 0) {
         let key = null;
-
         if (prop === 'itemSpacing') {
-          // Для расстояний между элементами ищем ТОЛЬКО Gap
           key = varMap[`Gap/General/${val}`] || varMap[`Gap/${val}`];
         } else {
-          // Для внутренних отступов ищем ТОЛЬКО Padding
           key = varMap[`Padding/${val}`];
         }
 
@@ -27,12 +24,32 @@ async function walkAndApply(node: SceneNode, varMap: any) {
           try {
             const v = await figma.variables.importVariableByKeyAsync(key);
             node.setBoundVariable(prop as VariableBindableNodeField, v.id);
-          } catch (e) { console.error("Binding error:", e); }
+          } catch (e) { /* пропуск */ }
         }
       }
     }
   }
 
+  // 2. Обработка Corner Radius (Скругления)
+  if ("topLeftRadius" in node) {
+    const radiusProps = ['topLeftRadius', 'topRightRadius', 'bottomLeftRadius', 'bottomRightRadius'];
+    
+    // Проверяем каждое свойство угла отдельно, так как Figma требует индивидуальной привязки
+    for (const prop of radiusProps) {
+      const val = (node as any)[prop];
+      if (typeof val === 'number' && val > 0) {
+        const key = varMap[`Radius/${val}`];
+        if (key) {
+          try {
+            const v = await figma.variables.importVariableByKeyAsync(key);
+            node.setBoundVariable(prop as VariableBindableNodeField, v.id);
+          } catch (e) { /* пропуск */ }
+        }
+      }
+    }
+  }
+
+  // Рекурсия по детям
   if ("children" in node) {
     for (const child of node.children) {
       await walkAndApply(child, varMap);
@@ -52,9 +69,7 @@ figma.ui.onmessage = async (msg) => {
     for (const col of collections) {
       for (const varId of col.variableIds) {
         const v = await figma.variables.getVariableByIdAsync(varId);
-        if (v && !v.remote) {
-          finalJson[v.name] = v.key;
-        }
+        if (v && !v.remote) finalJson[v.name] = v.key;
       }
     }
     figma.ui.postMessage({ type: 'push-to-github', data: finalJson });
@@ -68,6 +83,6 @@ figma.ui.onmessage = async (msg) => {
     for (const node of figma.currentPage.selection) {
       await walkAndApply(node, msg.data);
     }
-    figma.notify("✨ Готово!");
+    figma.notify("✨ Скругления и отступы синхронизированы!");
   }
 };
